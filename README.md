@@ -62,5 +62,3 @@ Market data as of early November 2026.
 ---
 
 *This is a student project for educational purposes only and is not investment advice.*
-
-**Author:** [Your name] · Business Intelligence & Finance, City University of Hong Kong · [LinkedIn URL] · [Email]
