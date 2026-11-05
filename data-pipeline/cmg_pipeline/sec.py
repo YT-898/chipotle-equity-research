@@ -91,9 +91,9 @@ def entries(facts, tags, unit=None, taxonomy="us-gaap"):
     return found[0] if found else (None, [])
 
 
-def latest_instant(facts, tags):
+def latest_instant(facts, tags, unit=None, taxonomy="us-gaap"):
     """Most recent balance-sheet value (a point in time)."""
-    tag, es = entries(facts, tags)
+    tag, es = entries(facts, tags, unit, taxonomy)
     es = [e for e in es if "start" not in e]
     if not es:
         return None, None
@@ -147,3 +147,18 @@ def quarterly(facts, tags, unit=None):
         if nine:
             q[a["end"]] = a["val"] - max(nine, key=lambda e: e["end"])["val"]
     return dict(sorted(q.items()))
+
+
+def latest_share_count(facts, tags):
+    """Latest weighted-average share count, as reported (never derived).
+
+    Share counts are averages, not flows, so "full year − nine months" (used for revenue Q4)
+    would give nonsense. Prefer the latest 3-month figure, otherwise the latest of any length,
+    otherwise the share count on the filing's cover page."""
+    for _, es in entries_by_recency(facts, tags, unit="shares"):
+        flows = [e for e in es if "start" in e and e["val"] > 0]
+        if flows:
+            q = [e for e in flows if 80 <= _days(e) <= 100]
+            e = max(q or flows, key=lambda e: e["end"])
+            return e["val"], e["end"]
+    return latest_instant(facts, ["EntityCommonStockSharesOutstanding"], unit="shares", taxonomy="dei")

@@ -1,7 +1,7 @@
 """Build the comps table and write the new inputs into the Excel model."""
 import os
 import shutil
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -32,16 +32,29 @@ def fundamentals(facts):
         return v
 
     st_inv, lt_inv = bal("st_investments"), bal("lt_investments")
-    debt = bal("debt_total")
-    if debt is None:
-        debt = _sum(bal("debt_noncurrent"), bal("debt_current"))
-    debt = _sum(debt, bal("short_borrowings"), bal("finance_lease"))
+    # Companies tag debt differently (one total line, or non-current + current, sometimes with
+    # finance leases folded in). Every candidate below can only understate total debt, never
+    # overstate it, so the largest one is the most complete.
+    # Some companies (e.g. Yum) tag the current portion of long-term debt as "short-term
+    # borrowings", so short-term borrowings are only added when no current-portion tag exists,
+    # otherwise the same line would be counted twice.
+    current = bal("debt_current")
+    if current is None:
+        current = bal("short_borrowings")
+    candidates = [
+        bal("debt_total"),
+        _sum(bal("debt_noncurrent"), current),
+    ]
+    candidates = [c for c in candidates if c is not None]
+    debt = max(candidates) if candidates else None
+    if debt is not None and bal("finance_lease") and not sec.latest_instant(
+            facts, ["LongTermDebtAndCapitalLeaseObligations"])[0]:
+        debt += bal("finance_lease")
     lease = bal("lease_total")
     if lease is None:
         lease = _sum(bal("lease_current"), bal("lease_noncurrent"))
 
-    qs = sec.quarterly(facts, T["diluted_shares"], unit="shares")
-    dil = list(qs.values())[-1] if qs else None
+    dil, _ = sec.latest_share_count(facts, T["diluted_shares"])
 
     m = lambda v: None if v is None else v / 1e6
     return {
@@ -54,25 +67,39 @@ def fundamentals(facts):
     }
 
 
+def _market_cap(q, sec_diluted_shares):
+    """Market cap in $ millions, cross-checked three ways because any single source can be garbage
+    (Yahoo has returned ~0 for McDonald's): Yahoo's figure, price × Yahoo shares, price × SEC
+    diluted shares. Near-zero values are dropped; with three left the median wins, with two that
+    disagree by more than 50% the SEC-based figure wins."""
+    yahoo = q["market_cap"] / 1e6 if q.get("market_cap") else None
+    yahoo_shares = q["price"] * q["shares"] / 1e6 if q.get("shares") else None
+    sec_based = q["price"] * sec_diluted_shares if sec_diluted_shares else None
+    vals = [v for v in (yahoo, yahoo_shares, sec_based) if v and v > 1]
+    if not vals:
+        return None
+    if len(vals) == 3:
+        return sorted(vals)[1]
+    if len(vals) == 2 and max(vals) / min(vals) > 1.5:
+        return sec_based if sec_based in vals else max(vals)
+    return vals[0]
+
+
 def build_table(use_cache=True):
     rows = []
     for c in config.COMPANIES:
         cik = c["cik"] or sec.resolve_cik(c["ticker"])
         f = fundamentals(sec.company_facts(cik, use_cache))
         q = market.quote(c["ticker"])
-        mcap_yahoo = q["market_cap"] / 1e6 if q["market_cap"] else None
-        mcap_calc = q["price"] * f["diluted_shares"] if f["diluted_shares"] else None
-        # Yahoo's market cap is occasionally missing or garbage (e.g. near zero). If it is more than
-        # 50% away from price × diluted shares, use the calculated figure instead.
-        if mcap_calc and (not mcap_yahoo or abs(mcap_yahoo / mcap_calc - 1) > 0.5):
-            mcap = mcap_calc
-        else:
-            mcap = mcap_yahoo
+        mcap = _market_cap(q, f["diluted_shares"])
         f.update({"ticker": c["ticker"], "name": c["name"], "price": q["price"], "market_cap": mcap})
         f["cash_and_st"] = _sum(f["cash"], f["st_investments"])
         f["ev"] = f["market_cap"] + (f["debt_incl_leases"] or 0) - (f["cash_and_st"] or 0) if f["market_cap"] else None
         f["ev_ebitda"] = f["ev"] / f["ebitda_ttm"] if f["ev"] and f["ebitda_ttm"] and f["ebitda_ttm"] > 0 else None
-        f["pe"] = f["price"] / f["eps_ttm"] if f["eps_ttm"] and f["eps_ttm"] > 0 else None
+        # P/E is "NM" when EPS is negative, or when operating EBITDA is negative: then any positive
+        # EPS comes from one-off gains (e.g. an asset sale), not from the business.
+        ok = f["eps_ttm"] and f["eps_ttm"] > 0 and (f["ebitda_ttm"] is None or f["ebitda_ttm"] > 0)
+        f["pe"] = f["price"] / f["eps_ttm"] if ok else None
         rows.append(f)
         print(f"  {c['ticker']:5} mkt cap {f['market_cap'] or 0:>9,.0f}  debt incl. leases {f['debt_incl_leases'] or 0:>8,.0f}  "
               f"(debt {f['debt_ex_leases'] or 0:,.0f} + leases {f['operating_leases'] or 0:,.0f})")
@@ -87,7 +114,12 @@ def update_model(df, model_path):
     if not os.path.exists(model_path):
         print(f"  Model not found at {model_path}; skipped Excel update.")
         return None
-    backup = model_path.replace(".xlsx", f"_backup_{date.today().isoformat()}.xlsx")
+    # Timestamped so running twice in one day never overwrites an earlier backup.
+    stem = model_path.replace(".xlsx", f"_backup_{datetime.now():%Y-%m-%d_%H%M%S}")
+    backup, n = stem + ".xlsx", 1
+    while os.path.exists(backup):
+        n += 1
+        backup = f"{stem}_{n}.xlsx"
     shutil.copy(model_path, backup)
     wb = load_workbook(model_path)
     ws = wb["Comps"]
@@ -108,6 +140,7 @@ def update_model(df, model_path):
                 "liabilities; 'debt' INCLUDES lease liabilities) + Yahoo Finance market data, via data-pipeline. "
                 "EV recomputed here = Market cap + Debt − Cash for every company.")
     ws["A3"] = f"All rows refreshed on the same day ({today}) by data-pipeline/run_all.py."
+    ws["E42"] = f"Latest close as of {today}"
     cmg = df.loc["CMG"]
     wb["WACC"]["B17"] = round(float(cmg["price"]), 2)
     dcf = wb["DCF"]

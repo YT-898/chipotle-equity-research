@@ -20,6 +20,14 @@ An end-to-end equity research project built from public filings: a fast-casual i
 - Food and labor take **54% of every sales dollar**; Q3 2026 operating margin fell 2.2 pts to 13.7%
 - Fast-casual growth slowed from ~9% to ~6% in 2025, driven by new units rather than traffic
 
+### Latest refresh: Nov 6, 2026 (via the data pipeline)
+
+The pitch deck is a snapshot as of Nov 2. Re-running the [data pipeline](data-pipeline/) pulled every peer from SEC filings and Yahoo Finance on the same day:
+
+- Share price **$35.38**, so the $28 price target now implies **~20% downside**. **Rating unchanged: SELL**
+- Peer median EV/EBITDA is **19.5x** (vs 16.8x before, when peer data came from different dates and not every peer's debt included leases). CMG trades at **22.5x**, still a ~15% premium
+- Comps-implied value rises to **$29.91** (from $27.74), still below the share price
+
 ---
 
 ## What's in this repo

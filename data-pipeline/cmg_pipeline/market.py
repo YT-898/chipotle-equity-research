@@ -6,8 +6,13 @@ def quote(ticker):
     t = yf.Ticker(ticker)
     fi = t.fast_info
     price = float(fi["last_price"])
-    mcap = fi.get("market_cap")
-    return {"price": price, "market_cap": float(mcap) if mcap else None}
+    def safe(key):
+        try:
+            v = fi[key]
+            return float(v) if v else None
+        except Exception:
+            return None
+    return {"price": price, "market_cap": safe("market_cap"), "shares": safe("shares")}
 
 
 def history(ticker, period="3y", interval="1wk"):

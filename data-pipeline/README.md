@@ -18,7 +18,7 @@ python run_all.py
 4. **Updates the Excel model**: Comps tab, share price (WACC tab), cash and diluted shares (DCF tab). A dated backup is saved first and formulas are never overwritten
 5. **Builds a dashboard** (`output/cmg_dashboard.html`): quarterly revenue and YoY growth, same-store sales, operating margin, food and labor cost ratios, share price, EV/EBITDA vs peers
 
-<!-- ![Pipeline run](images/run.png) -->
+![Pipeline run](images/run.png)
 
 <!-- Screenshot: Comps tab before and after a refresh
 ![Comps before and after](images/comps_before_after.png) -->
